@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { motion } from 'framer-motion';
-import { Plus, Search, Calendar, Filter, Users, GitBranch, Download } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
+import { Plus, Search, Calendar, Filter, Users, GitBranch, Download, X, ChevronUp, ChevronDown } from 'lucide-react';
 import useERP from '../store/useERP';
 
 const getDayOfYear = (dateString) => {
@@ -16,7 +16,11 @@ export default function Schedule() {
   const [selectedProject, setSelectedProject] = useState('prj-001');
   const [search, setSearch] = useState('');
   const [showModal, setShowModal] = useState(false);
-  const [formData, setFormData] = useState({ name: '', start: '', end: '', assignee: '' });
+  const [formData, setFormData] = useState({ name: '', start: '', end: '', assignee: '', progress: 0 });
+
+  // Inline progress editor state
+  const [editingTaskId, setEditingTaskId] = useState(null);
+  const [editingProgress, setEditingProgress] = useState(0);
 
   const projectTasks = tasks.filter(t => t.projectId === selectedProject);
   const filteredTasks = projectTasks.filter(t => t.name.toLowerCase().includes(search.toLowerCase()));
@@ -24,14 +28,24 @@ export default function Schedule() {
   const handleModalSubmit = (e) => {
     e.preventDefault();
     if (formData.name && formData.start && formData.end) {
-      addTask({ ...formData, projectId: selectedProject });
+      addTask({ ...formData, progress: Number(formData.progress), projectId: selectedProject });
       setShowModal(false);
-      setFormData({ name: '', start: '', end: '', assignee: '' });
+      setFormData({ name: '', start: '', end: '', assignee: '', progress: 0 });
     }
   };
 
+  const handleBarClick = (task) => {
+    setEditingTaskId(task.id);
+    setEditingProgress(task.progress);
+  };
+
+  const handleProgressSave = (taskId) => {
+    updateTask(taskId, { progress: Number(editingProgress) });
+    setEditingTaskId(null);
+  };
+
   const months = ['Oca', 'Şub', 'Mar', 'Nis', 'May', 'Haz', 'Tem', 'Ağu', 'Eyl', 'Eki', 'Kas', 'Ara'];
-  const totalDays = 366; // 2024 is a leap year
+  const totalDays = 366;
 
   return (
     <div>
@@ -64,9 +78,13 @@ export default function Schedule() {
         </div>
         <div className="glass-card" style={{ padding: 18 }}>
           <div style={{ fontSize: 26, fontWeight: 700, color: '#f59e0b', fontFamily: 'Outfit, sans-serif' }}>
-            %{projectTasks.length ? Math.round(projectTasks.reduce((s, t) => s + t.progress, 0) / projectTasks.length) : 0}
+            %{projectTasks.length ? Math.round(projectTasks.reduce((s, t) => s + (t.progress || 0), 0) / projectTasks.length) : 0}
           </div>
           <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>Proje İlerlemesi</div>
+        </div>
+        <div className="glass-card" style={{ padding: 18 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 6 }}>Gantt çubuğuna tıkla →</div>
+          <div style={{ fontSize: 13, color: 'var(--text-secondary)', fontWeight: 500 }}>İlerleme yüzdesini güncelle</div>
         </div>
       </div>
 
@@ -90,7 +108,7 @@ export default function Schedule() {
             {filteredTasks.map(task => {
               const person = personnel.find(p => p.id === task.assignee);
               return (
-                <div key={task.id} style={{ height: 50, borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 16px' }}>
+                <div key={task.id} style={{ height: 60, borderBottom: '1px solid var(--border-subtle)', display: 'flex', flexDirection: 'column', justifyContent: 'center', padding: '0 16px' }}>
                   <div style={{ fontSize: 13, fontWeight: 500, color: 'var(--text-primary)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{task.name}</div>
                   <div style={{ fontSize: 11, color: 'var(--text-muted)', marginTop: 2, display: 'flex', alignItems: 'center', gap: 4 }}>
                     <Users size={10} /> {person ? person.name : 'Atanmadı'}
@@ -104,7 +122,7 @@ export default function Schedule() {
           <div style={{ flex: 1, minWidth: 800, position: 'relative' }}>
             {/* Months Header */}
             <div style={{ height: 40, borderBottom: '1px solid var(--border-subtle)', display: 'flex', background: 'rgba(255,255,255,0.01)' }}>
-              {months.map((m, i) => (
+              {months.map((m) => (
                 <div key={m} style={{ flex: 1, borderRight: '1px solid var(--border-subtle)', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: 11, fontWeight: 600, color: 'var(--text-muted)' }}>
                   {m}
                 </div>
@@ -113,7 +131,7 @@ export default function Schedule() {
 
             {/* Grid Background */}
             <div style={{ position: 'absolute', top: 40, left: 0, right: 0, bottom: 0, display: 'flex', pointerEvents: 'none' }}>
-              {months.map((m, i) => (
+              {months.map((m) => (
                 <div key={m} style={{ flex: 1, borderRight: '1px dashed var(--border-subtle)' }} />
               ))}
             </div>
@@ -122,36 +140,128 @@ export default function Schedule() {
             <div style={{ position: 'relative', paddingTop: 10 }}>
               {filteredTasks.map((task, index) => {
                 const startDay = getDayOfYear(task.start);
-                const endDay = Math.max(getDayOfYear(task.end), startDay + 1); // Minimum 1 day width
+                const endDay = Math.max(getDayOfYear(task.end), startDay + 1);
                 const leftPercent = (startDay / totalDays) * 100;
                 const widthPercent = ((endDay - startDay) / totalDays) * 100;
+                const isEditing = editingTaskId === task.id;
 
                 return (
-                  <div key={task.id} style={{ height: 50, position: 'relative' }}>
+                  <div key={task.id} style={{ height: 60, position: 'relative' }}>
                     <motion.div
                       initial={{ opacity: 0, width: 0 }}
                       animate={{ opacity: 1, width: `${widthPercent}%` }}
                       transition={{ duration: 0.5, delay: index * 0.05 }}
+                      onClick={() => !isEditing && handleBarClick(task)}
                       style={{
                         position: 'absolute',
                         left: `${leftPercent}%`,
                         top: 10,
-                        height: 28,
-                        background: `linear-gradient(90deg, ${task.color}80, ${task.color}40)`,
-                        border: `1px solid ${task.color}`,
-                        borderRadius: 6,
-                        overflow: 'hidden',
+                        height: 34,
+                        background: `linear-gradient(90deg, ${task.color}90, ${task.color}50)`,
+                        border: `1.5px solid ${task.color}`,
+                        borderRadius: 8,
+                        overflow: 'visible',
                         cursor: 'pointer',
-                        boxShadow: '0 4px 12px rgba(0,0,0,0.05)'
+                        boxShadow: isEditing ? `0 0 0 2px ${task.color}60, 0 4px 16px rgba(0,0,0,0.1)` : '0 4px 12px rgba(0,0,0,0.05)',
+                        transition: 'box-shadow 0.2s',
                       }}
                     >
                       {/* Progress Fill */}
-                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${task.progress}%`, background: task.color, opacity: 0.3 }} />
-                      
-                      <div style={{ position: 'absolute', left: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 600, color: task.color, whiteSpace: 'nowrap' }}>
-                        {task.progress}%
+                      <div style={{ position: 'absolute', left: 0, top: 0, bottom: 0, width: `${task.progress || 0}%`, background: task.color, opacity: 0.35, borderRadius: '6px 0 0 6px', transition: 'width 0.3s' }} />
+
+                      <div style={{ position: 'absolute', left: 8, top: 0, bottom: 0, display: 'flex', alignItems: 'center', fontSize: 11, fontWeight: 700, color: task.color, whiteSpace: 'nowrap', zIndex: 1 }}>
+                        %{task.progress || 0}
                       </div>
                     </motion.div>
+
+                    {/* Inline Progress Editor Popup */}
+                    <AnimatePresence>
+                      {isEditing && (
+                        <motion.div
+                          initial={{ opacity: 0, y: -8, scale: 0.95 }}
+                          animate={{ opacity: 1, y: 0, scale: 1 }}
+                          exit={{ opacity: 0, y: -8, scale: 0.95 }}
+                          transition={{ duration: 0.15 }}
+                          style={{
+                            position: 'absolute',
+                            left: `calc(${leftPercent}% + 4px)`,
+                            top: 48,
+                            zIndex: 100,
+                            background: '#ffffff',
+                            border: `1.5px solid ${task.color}`,
+                            borderRadius: 12,
+                            padding: '12px 16px',
+                            boxShadow: '0 8px 30px rgba(0,0,0,0.15)',
+                            minWidth: 240,
+                          }}
+                          onClick={e => e.stopPropagation()}
+                        >
+                          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+                            <span style={{ fontSize: 13, fontWeight: 700, color: task.color }}>{task.name}</span>
+                            <button onClick={() => setEditingTaskId(null)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)', padding: 2 }}>
+                              <X size={14} />
+                            </button>
+                          </div>
+
+                          {/* Percentage display */}
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 8 }}>
+                            <span style={{ fontSize: 28, fontWeight: 800, color: task.color, fontFamily: 'Outfit, sans-serif', minWidth: 60 }}>
+                              %{editingProgress}
+                            </span>
+                            <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                              <button
+                                onClick={() => setEditingProgress(Math.min(100, Number(editingProgress) + 5))}
+                                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-primary)' }}
+                              >
+                                <ChevronUp size={12} />
+                              </button>
+                              <button
+                                onClick={() => setEditingProgress(Math.max(0, Number(editingProgress) - 5))}
+                                style={{ background: 'var(--bg-secondary)', border: '1px solid var(--border-subtle)', borderRadius: 4, padding: '2px 6px', cursor: 'pointer', color: 'var(--text-primary)' }}
+                              >
+                                <ChevronDown size={12} />
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Slider */}
+                          <input
+                            type="range"
+                            min={0}
+                            max={100}
+                            step={5}
+                            value={editingProgress}
+                            onChange={e => setEditingProgress(e.target.value)}
+                            style={{ width: '100%', marginBottom: 10, accentColor: task.color }}
+                          />
+
+                          {/* Quick presets */}
+                          <div style={{ display: 'flex', gap: 4, marginBottom: 10, flexWrap: 'wrap' }}>
+                            {[0, 25, 50, 75, 100].map(v => (
+                              <button
+                                key={v}
+                                onClick={() => setEditingProgress(v)}
+                                style={{
+                                  padding: '3px 8px', borderRadius: 6, border: `1px solid ${Number(editingProgress) === v ? task.color : 'var(--border-subtle)'}`,
+                                  background: Number(editingProgress) === v ? `${task.color}15` : 'transparent',
+                                  color: Number(editingProgress) === v ? task.color : 'var(--text-secondary)',
+                                  fontSize: 11, fontWeight: 600, cursor: 'pointer'
+                                }}
+                              >
+                                %{v}
+                              </button>
+                            ))}
+                          </div>
+
+                          <button
+                            onClick={() => handleProgressSave(task.id)}
+                            style={{ width: '100%', padding: '8px', borderRadius: 8, border: 'none', background: task.color, color: '#fff', fontSize: 13, fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            Kaydet
+                          </button>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
                   </div>
                 );
               })}
@@ -160,39 +270,74 @@ export default function Schedule() {
         </div>
       </div>
 
-      {/* Modal */}
+      {/* Add Task Modal */}
       {showModal && (
-        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.6)', backdropFilter: 'blur(5px)' }}>
-          <div className="glass-card" style={{ width: 400, padding: 24, position: 'relative' }}>
-            <h3 style={{ marginTop: 0, marginBottom: 20 }}>Yeni Görev (Süreç) Ekle</h3>
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, display: 'flex', alignItems: 'center', justifyContent: 'center', background: 'rgba(0,0,0,0.5)', backdropFilter: 'blur(5px)' }}>
+          <motion.div
+            initial={{ opacity: 0, scale: 0.95, y: 20 }}
+            animate={{ opacity: 1, scale: 1, y: 0 }}
+            className="glass-card"
+            style={{ width: 440, padding: 28, position: 'relative' }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: 16, fontWeight: 700, color: 'var(--text-primary)' }}>Yeni Görev (Süreç) Ekle</h3>
+              <button onClick={() => setShowModal(false)} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}>
+                <X size={18} />
+              </button>
+            </div>
             <form onSubmit={handleModalSubmit} style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
               <div>
-                <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)' }}>Görev Adı</label>
-                <input required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="search-input" style={{ width: '100%', padding: '10px 14px' }} />
+                <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)', fontWeight: 600 }}>Görev Adı</label>
+                <input required value={formData.name} onChange={e => setFormData({ ...formData, name: e.target.value })} className="search-input" style={{ width: '100%', padding: '10px 14px' }} placeholder="Örn: Zemin Etüdü" />
               </div>
               <div style={{ display: 'flex', gap: 16 }}>
                 <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)' }}>Başlangıç</label>
+                  <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)', fontWeight: 600 }}>Başlangıç</label>
                   <input type="date" required value={formData.start} onChange={e => setFormData({ ...formData, start: e.target.value })} className="search-input" style={{ width: '100%', padding: '10px 14px' }} />
                 </div>
                 <div style={{ flex: 1 }}>
-                  <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)' }}>Bitiş</label>
+                  <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)', fontWeight: 600 }}>Bitiş</label>
                   <input type="date" required value={formData.end} onChange={e => setFormData({ ...formData, end: e.target.value })} className="search-input" style={{ width: '100%', padding: '10px 14px' }} />
                 </div>
               </div>
               <div>
-                <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)' }}>Atanan Personel</label>
+                <label style={{ display: 'block', fontSize: 12, marginBottom: 6, color: 'var(--text-secondary)', fontWeight: 600 }}>Atanan Personel</label>
                 <select value={formData.assignee} onChange={e => setFormData({ ...formData, assignee: e.target.value })} className="search-input" style={{ width: '100%', padding: '10px 14px' }}>
                   <option value="">Seçiniz...</option>
                   {personnel.map(p => <option key={p.id} value={p.id}>{p.name} ({p.role})</option>)}
                 </select>
               </div>
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 10 }}>
+
+              {/* Progress Slider */}
+              <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 }}>
+                  <label style={{ fontSize: 12, color: 'var(--text-secondary)', fontWeight: 600 }}>Başlangıç İlerlemesi</label>
+                  <span style={{ fontSize: 20, fontWeight: 800, color: '#3b82f6', fontFamily: 'Outfit, sans-serif' }}>%{formData.progress}</span>
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={100}
+                  step={5}
+                  value={formData.progress}
+                  onChange={e => setFormData({ ...formData, progress: e.target.value })}
+                  style={{ width: '100%', accentColor: '#3b82f6' }}
+                />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10, color: 'var(--text-muted)', marginTop: 4 }}>
+                  <span>%0</span>
+                  <span>%25</span>
+                  <span>%50</span>
+                  <span>%75</span>
+                  <span>%100</span>
+                </div>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, marginTop: 4 }}>
                 <button type="button" className="btn btn-ghost" onClick={() => setShowModal(false)}>İptal</button>
                 <button type="submit" className="btn btn-primary">Kaydet</button>
               </div>
             </form>
-          </div>
+          </motion.div>
         </div>
       )}
     </div>
